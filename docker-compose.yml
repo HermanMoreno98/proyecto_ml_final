@@ -104,11 +104,11 @@ services:
         pip install --no-cache-dir \
           "xgboost>=2.0.0" \
           "optuna>=3.6.0" \
-          "mlflow>=2.13.0" \
+          "mlflow==2.13.0" \
           "scikit-learn>=1.4.0" \
           "boto3>=1.34.0" \
           "s3fs>=2024.1.0" &&
-        airflow db migrate &&
+        airflow db upgrade &&
         airflow users create \
           --username admin \
           --password admin \
@@ -140,10 +140,11 @@ services:
         pip install --no-cache-dir \
           'xgboost>=2.0.0' \
           'optuna>=3.6.0' \
-          'mlflow>=2.13.0' \
+          'mlflow==2.13.0' \
           'scikit-learn>=1.4.0' \
           'boto3>=1.34.0' \
           's3fs>=2024.1.0' &&
+        airflow db upgrade || true &&
         airflow webserver
     ports:
       - "8080:8080"
@@ -170,10 +171,11 @@ services:
         pip install --no-cache-dir \
           'xgboost>=2.0.0' \
           'optuna>=3.6.0' \
-          'mlflow>=2.13.0' \
+          'mlflow==2.13.0' \
           'scikit-learn>=1.4.0' \
           'boto3>=1.34.0' \
           's3fs>=2024.1.0' &&
+        airflow db upgrade || true &&
         airflow scheduler
     depends_on:
       airflow-init:
