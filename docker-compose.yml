@@ -57,6 +57,7 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
@@ -78,7 +79,7 @@ services:
         mlflow server \
           --host 0.0.0.0 \
           --port 5000 \
-          --backend-store-uri postgresql+psycopg2://airflow:airflow@postgres/airflow \
+          --backend-store-uri postgresql+psycopg2://airflow:airflow@postgres/mlflow \
           --default-artifact-root s3://${MLFLOW_ARTIFACTS_BUCKET:-mlflow-artifacts}/ \
           --serve-artifacts
     environment:
