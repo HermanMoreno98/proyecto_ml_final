@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# MLflow
+mlruns/
+mlartifacts/
+mlruns.db
+
+# Data — archivos grandes no se versionan
+data/raw/*.csv
+data/processed/*.csv
+data/postprocessed/*.csv
+data/monitoring/*.csv
+data/replica/
+# Excepción: mantener estructura de carpetas
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/postprocessed/.gitkeep
+!data/monitoring/.gitkeep
+!data/replica/.gitkeep
+
+# Optuna
+optuna.db
+*.db
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Credenciales
+.env
+*.env
+config/secrets.yaml
+
+data/Data_CU_venta.csv

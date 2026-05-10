@@ -1,0 +1,50 @@
+# Control de versiones
+.git/
+.gitignore
+
+# Entorno virtual Python
+.venv/
+venv/
+env/
+
+# MLflow (se monta como volumen en docker-compose)
+mlruns/
+mlartifacts/
+mlruns.db
+
+# Datos grandes (se descargan desde S3 en runtime)
+data/raw/*.csv
+data/processed/*.csv
+data/postprocessed/*.csv
+data/monitoring/*.csv
+data/replica/
+
+# Cache Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+build/
+dist/
+
+# IDE y OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+instructions/
+
+# Credenciales locales
+.env
+*.env
+config/secrets.yaml
+
+# Tests y CI
+.pytest_cache/
+.coverage
+htmlcov/
+
+data/Data_CU_venta.csv

@@ -1,0 +1,110 @@
+# ============================================================
+# Configuración central del pipeline ML — CU Venta
+# Todos los parámetros operacionales están aquí para garantizar
+# reproducibilidad y facilitar auditoría.
+# ============================================================
+
+# --- Datos ---
+data:
+  # Bucket S3 con datos crudos (versionado habilitado obligatorio)
+  s3_bucket_raw: "ml-project-ucsp-s3"
+  # Prefijo S3 donde están los archivos p1_extrac.csv ... p10_extrac.csv
+  s3_prefix_raw: "raw/"
+  # Nombre del archivo consolidado generado localmente
+  unified_filename: "Data_CU_venta.csv"
+  # Bucket S3 para artefactos procesados (train/test/val)
+  s3_bucket_processed: "cu-venta-processed"
+  # Región AWS
+  aws_region: "us-east-1"
+  # Ruta local de fallback (cuando no hay acceso a S3)
+  local_raw_dir: "data/raw"
+
+# --- Preprocesamiento ---
+preprocessing:
+  # Porcentaje de NaN a partir del cual se elimina la columna
+  nan_threshold: 80
+  # Mes de corte para el conjunto de validación temporal
+  validation_codmes: 201912.0
+  # Proporción del conjunto de test (70/30)
+  test_size: 0.30
+  # Semilla para reproducibilidad del split
+  random_state: 123
+
+# --- Modelo ---
+model:
+  # Hiperparámetros por defecto del XGBClassifier
+  xgb_params:
+    eval_metric: "logloss"
+    use_label_encoder: false
+    random_state: 42
+    n_estimators: 100
+    max_depth: 6
+    learning_rate: 0.1
+
+# --- HPO (Optuna) ---
+hpo:
+  # Número de trials de búsqueda
+  n_trials: 30
+  # Métrica objetivo
+  metric: "test_roc_auc"
+  direction: "maximize"
+  # Espacio de búsqueda
+  search_space:
+    n_estimators: [50, 500]
+    max_depth: [3, 10]
+    learning_rate: [0.001, 0.3]
+    subsample: [0.5, 1.0]
+    colsample_bytree: [0.5, 1.0]
+    min_child_weight: [1, 10]
+    gamma: [0.0, 1.0]
+    reg_alpha: [0.0001, 1.0]
+    reg_lambda: [0.0001, 1.0]
+
+# --- MLflow ---
+mlflow:
+  # URI del servidor de tracking (override con env var MLFLOW_TRACKING_URI)
+  tracking_uri: "http://localhost:5001"
+  # En Docker el servicio se llama "mlflow" internamente:
+  # tracking_uri: "http://mlflow:5000"
+  # Nombre del experimento
+  experiment_name: "cu_venta_e2e"
+  # Nombre en el Model Registry
+  model_name: "cu_venta_xgb"
+  # Bucket S3 para artefactos de MLflow
+  artifact_bucket: "mlflow-artifacts"
+
+# --- Airflow ---
+airflow:
+  # Frecuencia de ejecución del pipeline
+  schedule_interval: "@weekly"
+  # Número de reintentos ante fallo
+  retries: 1
+  # Tiempo entre reintentos (minutos)
+  retry_delay_minutes: 5
+
+# --- Control de calidad ---
+quality:
+  # Mínimo de filas requeridas en cada split
+  min_rows_train: 1000
+  min_rows_test: 300
+  min_rows_val: 100
+  # Máximo de NaN permitidos en los splits de salida
+  max_nan_in_output: 0
+
+# --- Monitoreo y deriva ---
+monitoring:
+  # Umbral PSI para disparar alerta automática de re-entrenamiento
+  psi_alert_threshold: 0.25
+  # PSI < 0.10  → OK (sin deriva)
+  # PSI 0.10-0.25 → WARN (deriva moderada)
+  # PSI > 0.25  → ALERT (re-entrenamiento automático)
+  output_dir: "data/monitoring"
+
+# --- Postprocesamiento ---
+postprocessing:
+  # Cuantiles para segmentación en grupos de ejecución TLV (NO modificar)
+  dist_ge: [0, 0.035, 0.087, 0.237, 0.393, 0.529, 0.664, 0.787, 0.862, 0.95, 1.0]
+  # Tabla destino para la réplica
+  table: "EC_OMNICANAL"
+  output_dir: "data/postprocessed"
+  replica_dir: "data/replica"
