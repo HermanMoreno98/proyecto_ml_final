@@ -46,7 +46,7 @@ Ingestión S3 → Preprocesamiento → Validación → Entrenamiento HPO (Optuna
                                                          ↓
                                               ┌─ PSI > 0.25 → Re-entrenamiento automático
                                               ↓
-           PSI OK → Model Registry (Staging) → Postprocesamiento
+           PSI OK → Model Registry (Staging) → Postprocesamiento → Upload S3
 ```
 
 ## Etapas del pipeline
@@ -56,11 +56,12 @@ Ingestión S3 → Preprocesamiento → Validación → Entrenamiento HPO (Optuna
 | 1. Ingestión | `src/ingestion.py` | Descarga CSV desde S3 con versionado; registra VersionId para trazabilidad |
 | 2. Preprocesamiento | `src/preprocessing.py` | Elimina columnas >80% NaN, imputa, codifica categóricas, split temporal train/test/val |
 | 3. Validación | DAG | Verifica filas mínimas y columnas requeridas en cada split |
-| 4. Entrenamiento | `src/training.py` | HPO con Optuna (30 trials), registra parámetros/métricas/modelo en MLflow |
-| 5. Monitoreo | `src/monitoring.py` | PSI variables crudas, procesadas y deciles de score; AUC y Recall por decil |
-| 6. Deriva | DAG | Si PSI score > 0.15, dispara re-entrenamiento automático vía TriggerDagRunOperator |
+| 4. Entrenamiento | `src/training.py` | HPO con Optuna (configurable, default 6 trials en Docker), registra parámetros/métricas/modelo en MLflow |
+| 5. Monitoreo | `src/monitoring.py` | PSI variables crudas, procesadas y deciles de score; AUC y Recall por decil; genera `metrics_by_month.csv` |
+| 6. Deriva | DAG | Si PSI score > 0.25, dispara re-entrenamiento automático vía TriggerDagRunOperator |
 | 7. Model Registry | MLflow | Promueve modelo a `Staging` en el MLflow Model Registry |
 | 8. Postprocesamiento | `src/postprocessing.py` | TLV scoring, segmentación en 10 grupos, réplica pipe-delimitada |
+| 9. Upload S3 | DAG | Sube `processed/`, `monitoring/`, `postprocessed/` y `replica/` al bucket S3 principal |
 
 ## Instalación
 
@@ -151,6 +152,8 @@ El pipeline descargará los CSV automáticamente desde S3 al arrancar el DAG.
 > Puedes cambiar entre modos sin reiniciar los contenedores desde la UI de Airflow:
 > `Admin → Variables → DATA_SOURCE` → `local` o `s3`.
 
+> **Nota:** `dashboard.py` está montado como volumen en el contenedor Streamlit. Cualquier cambio al archivo se recarga automáticamente sin necesidad de rebuild.
+
 **4. Levanta todos los servicios:**
 
 ```bash
@@ -195,15 +198,16 @@ docker compose exec airflow-web airflow variables set PSI_ALERT_THRESHOLD 0.25
 ## Estructura del bucket S3 (solo para DATA_SOURCE=s3)
 
 ```
-s3://tu-bucket/
-└── raw/
-    ├── p1_extrac.csv
-    ├── p2_extrac.csv
-    ├── ...
-    └── p10_extrac.csv
+s3://ml-project-ucsp-s3/
+├── raw/                  ← datos de entrada (p1_extrac.csv … p10_extrac.csv)
+├── processed/            ← df_train.csv, df_test.csv, df_val.csv  [generado por pipeline]
+├── monitoring/           ← psi_*.csv, metrics_by_month.csv        [generado por pipeline]
+├── postprocessed/        ← output_tlv.csv                         [generado por pipeline]
+└── replica/              ← EC_OMNICANAL_*.txt                     [generado por pipeline]
 ```
 
-Los mismos datos están disponibles localmente en `data/raw/` para la Opción A.
+Las carpetas `processed/`, `monitoring/`, `postprocessed/` y `replica/` se crean y actualizan automáticamente al finalizar cada ejecución del DAG (tarea `upload_processed`).
+Los mismos datos están disponibles localmente en `data/` para la Opción A.
 
 ## MLflow Model Registry — Flujo de versiones
 
@@ -242,7 +246,7 @@ El módulo `src/monitoring.py` calcula tres tipos de PSI:
 |---|---|---|
 | < 0.10 | OK | Sin acción |
 | 0.10 – 0.25 | WARN | Revisar manualmente |
-| > 0.25 | ALERT | Re-entrenamiento automático |
+| > 0.25 | ALERT | Re-entrenamiento automático (configurable via Variable `PSI_ALERT_THRESHOLD`) |
 
 ## Scoring TLV y grupos de ejecución
 
