@@ -198,6 +198,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./mlartifacts:/app/mlartifacts
+      - ./dashboard.py:/app/dashboard.py
     depends_on:
       - mlflow
     restart: always
