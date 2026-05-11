@@ -567,12 +567,12 @@ def task_postprocess(**context) -> None:
 def task_upload_processed(**context) -> None:
     """
     Sube los artefactos generados por el pipeline al bucket principal (ml-project-ucsp-s3),
-    bajo el prefijo data/ para espejear la estructura local:
+    en la raíz del bucket junto a raw/:
 
-      data/processed/     → s3://<bucket>/data/processed/
-      data/monitoring/    → s3://<bucket>/data/monitoring/
-      data/postprocessed/ → s3://<bucket>/data/postprocessed/
-      data/replica/       → s3://<bucket>/data/replica/
+      data/processed/     → s3://<bucket>/processed/
+      data/monitoring/    → s3://<bucket>/monitoring/
+      data/postprocessed/ → s3://<bucket>/postprocessed/
+      data/replica/       → s3://<bucket>/replica/
     """
     import boto3
 
@@ -591,7 +591,7 @@ def task_upload_processed(**context) -> None:
         if not directory.exists():
             logger.warning("Directorio no encontrado, se omite: %s", directory)
             continue
-        prefix = f"data/{directory.name}"  # data/processed | data/monitoring | ...
+        prefix = directory.name  # processed | monitoring | postprocessed | replica
         for file_path in directory.glob("*"):
             if not file_path.is_file():
                 continue
@@ -600,7 +600,7 @@ def task_upload_processed(**context) -> None:
             s3.upload_file(str(file_path), bucket, s3_key)
             uploaded += 1
 
-    logger.info("Upload completado: %d archivos subidos a s3://%s/data/", uploaded, bucket)
+    logger.info("Upload completado: %d archivos subidos a s3://%s/", uploaded, bucket)
 
 
 # ---------------------------------------------------------------------------
