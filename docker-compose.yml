@@ -20,6 +20,9 @@
 # ============================================================
 
 x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
   image: airflow-custom:latest
   env_file: .env
   environment:
