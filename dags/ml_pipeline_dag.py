@@ -566,45 +566,24 @@ def task_postprocess(**context) -> None:
 
 def task_upload_processed(**context) -> None:
     """
-    Sube al bucket S3_BUCKET_PROCESSED los artefactos generados por el pipeline:
-      - data/processed/   → processed/
-      - data/monitoring/  → monitoring/
-      - data/postprocessed/ → postprocessed/
+    Sube los artefactos generados por el pipeline al bucket principal (ml-project-ucsp-s3),
+    bajo el prefijo data/ para espejear la estructura local:
 
-    Estructura en S3:
-        s3://<S3_BUCKET_PROCESSED>/<prefix>/<filename>
-    donde prefix es el nombre del subdirectorio local.
+      data/processed/     → s3://<bucket>/data/processed/
+      data/monitoring/    → s3://<bucket>/data/monitoring/
+      data/postprocessed/ → s3://<bucket>/data/postprocessed/
+      data/replica/       → s3://<bucket>/data/replica/
     """
     import boto3
-    from botocore.exceptions import ClientError
 
-    bucket = Variable.get("S3_BUCKET_PROCESSED", default_var="cu-venta-processed")
-    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-    s3 = boto3.client("s3", region_name=region)
-
-    # Crear el bucket si no existe
-    try:
-        s3.head_bucket(Bucket=bucket)
-        logger.info("Bucket s3://%s ya existe.", bucket)
-    except ClientError as e:
-        error_code = e.response["Error"]["Code"]
-        if error_code in ("404", "NoSuchBucket"):
-            logger.info("Bucket s3://%s no existe, creando...", bucket)
-            if region == "us-east-1":
-                s3.create_bucket(Bucket=bucket)
-            else:
-                s3.create_bucket(
-                    Bucket=bucket,
-                    CreateBucketConfiguration={"LocationConstraint": region},
-                )
-            logger.info("Bucket s3://%s creado correctamente.", bucket)
-        else:
-            raise
+    bucket = Variable.get("S3_BUCKET_RAW", default_var="ml-project-ucsp-s3")
+    s3 = boto3.client("s3")
 
     dirs_to_upload = [
         WORKDIR / "processed",
         WORKDIR / "monitoring",
         WORKDIR / "postprocessed",
+        WORKDIR / "replica",
     ]
 
     uploaded = 0
@@ -612,7 +591,7 @@ def task_upload_processed(**context) -> None:
         if not directory.exists():
             logger.warning("Directorio no encontrado, se omite: %s", directory)
             continue
-        prefix = directory.name  # processed | monitoring | postprocessed
+        prefix = f"data/{directory.name}"  # data/processed | data/monitoring | ...
         for file_path in directory.glob("*"):
             if not file_path.is_file():
                 continue
@@ -621,7 +600,7 @@ def task_upload_processed(**context) -> None:
             s3.upload_file(str(file_path), bucket, s3_key)
             uploaded += 1
 
-    logger.info("Upload completado: %d archivos subidos a s3://%s", uploaded, bucket)
+    logger.info("Upload completado: %d archivos subidos a s3://%s/data/", uploaded, bucket)
 
 
 # ---------------------------------------------------------------------------
