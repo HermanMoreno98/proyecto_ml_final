@@ -337,7 +337,8 @@ def task_monitor(**context) -> None:
     import mlflow
     import mlflow.xgboost
     import pandas as pd
-    from src.monitoring import run_monitoring
+    from sklearn.metrics import roc_auc_score
+    from src.monitoring import run_monitoring, compute_psi_score_deciles
 
     train_path = context["ti"].xcom_pull(key="train_path", task_ids="preprocess")
     val_path = context["ti"].xcom_pull(key="val_path", task_ids="preprocess")
@@ -393,6 +394,39 @@ def task_monitor(**context) -> None:
         "Monitoreo completado — PSI_score=%.4f | AUC=%.4f | Recall=%.4f",
         psi_score, metrics["auc"], metrics["recall"],
     )
+
+    # --- Métricas por partición (mes) para el dashboard ---
+    df_all = pd.concat([df_train, df_val], ignore_index=True)
+    all_scores = model.predict_proba(
+        df_all.drop(columns=[c for c in drop_cols if c in df_all.columns])
+    )[:, 1]
+    df_all = df_all.copy()
+    df_all["_score"] = all_scores
+
+    partition_order = [f"p{i}" for i in range(1, 11)]
+    partitions_present = [p for p in partition_order if p in df_all["partition"].unique()]
+    ref_scores = df_all[df_all["partition"] == partitions_present[0]]["_score"].values
+
+    month_rows = []
+    for part in partitions_present:
+        sub = df_all[df_all["partition"] == part]
+        part_scores = sub["_score"].values
+        part_y = sub[target_col].values
+        try:
+            auc_val = round(float(roc_auc_score(part_y, part_scores)), 4) if part_y.sum() > 0 else None
+        except Exception:
+            auc_val = None
+        try:
+            psi_val, _ = compute_psi_score_deciles(ref_scores, part_scores)
+            psi_val = round(float(psi_val), 6)
+        except Exception:
+            psi_val = None
+        month_rows.append({"partition": part, "auc": auc_val, "psi_score": psi_val, "n": len(sub)})
+
+    months_path = WORKDIR / "monitoring" / "metrics_by_month.csv"
+    pd.DataFrame(month_rows).to_csv(months_path, index=False)
+    logger.info("Métricas por mes guardadas en: %s", months_path)
+
     context["ti"].xcom_push(key="monitoring_results", value={
         "psi_score": psi_score,
         "val_auc": metrics["auc"],
@@ -530,6 +564,45 @@ def task_postprocess(**context) -> None:
     context["ti"].xcom_push(key="postprocess_path", value=str(output_path))
 
 
+def task_upload_processed(**context) -> None:
+    """
+    Sube al bucket S3_BUCKET_PROCESSED los artefactos generados por el pipeline:
+      - data/processed/   → processed/
+      - data/monitoring/  → monitoring/
+      - data/postprocessed/ → postprocessed/
+
+    Estructura en S3:
+        s3://<S3_BUCKET_PROCESSED>/<prefix>/<filename>
+    donde prefix es el nombre del subdirectorio local.
+    """
+    import boto3
+
+    bucket = Variable.get("S3_BUCKET_PROCESSED", default_var="cu-venta-processed")
+    s3 = boto3.client("s3")
+
+    dirs_to_upload = [
+        WORKDIR / "processed",
+        WORKDIR / "monitoring",
+        WORKDIR / "postprocessed",
+    ]
+
+    uploaded = 0
+    for directory in dirs_to_upload:
+        if not directory.exists():
+            logger.warning("Directorio no encontrado, se omite: %s", directory)
+            continue
+        prefix = directory.name  # processed | monitoring | postprocessed
+        for file_path in directory.glob("*"):
+            if not file_path.is_file():
+                continue
+            s3_key = f"{prefix}/{file_path.name}"
+            logger.info("Subiendo s3://%s/%s", bucket, s3_key)
+            s3.upload_file(str(file_path), bucket, s3_key)
+            uploaded += 1
+
+    logger.info("Upload completado: %d archivos subidos a s3://%s", uploaded, bucket)
+
+
 # ---------------------------------------------------------------------------
 # Definición del DAG
 # ---------------------------------------------------------------------------
@@ -598,10 +671,15 @@ with DAG(
         trigger_rule="none_failed_min_one_success",
     )
 
+    upload_processed = PythonOperator(
+        task_id="upload_processed",
+        python_callable=task_upload_processed,
+    )
+
     # Orden del pipeline:
     # ingest → preprocess → validate_outputs → train → monitor → check_drift
     #   ├─ trigger_retrain (si PSI > umbral)
-    #   └─ register_model → postprocess
+    #   └─ register_model → postprocess → upload_processed
     (
         ingest
         >> preprocess
@@ -611,4 +689,4 @@ with DAG(
         >> check_drift
         >> [trigger_retrain, register_model]
     )
-    register_model >> postprocess
+    register_model >> postprocess >> upload_processed
