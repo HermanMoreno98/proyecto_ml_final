@@ -576,9 +576,30 @@ def task_upload_processed(**context) -> None:
     donde prefix es el nombre del subdirectorio local.
     """
     import boto3
+    from botocore.exceptions import ClientError
 
     bucket = Variable.get("S3_BUCKET_PROCESSED", default_var="cu-venta-processed")
-    s3 = boto3.client("s3")
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    s3 = boto3.client("s3", region_name=region)
+
+    # Crear el bucket si no existe
+    try:
+        s3.head_bucket(Bucket=bucket)
+        logger.info("Bucket s3://%s ya existe.", bucket)
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        if error_code in ("404", "NoSuchBucket"):
+            logger.info("Bucket s3://%s no existe, creando...", bucket)
+            if region == "us-east-1":
+                s3.create_bucket(Bucket=bucket)
+            else:
+                s3.create_bucket(
+                    Bucket=bucket,
+                    CreateBucketConfiguration={"LocationConstraint": region},
+                )
+            logger.info("Bucket s3://%s creado correctamente.", bucket)
+        else:
+            raise
 
     dirs_to_upload = [
         WORKDIR / "processed",
