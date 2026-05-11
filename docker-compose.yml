@@ -49,8 +49,21 @@ x-airflow-common: &airflow-common
   depends_on:
     postgres:
       condition: service_healthy
+    fix-permissions:
+      condition: service_completed_successfully
 
 services:
+
+  # ------------------------------------------------------------------
+  # Fix de permisos — asigna ownership correcto al directorio data/
+  # para que el usuario airflow (uid 50000) pueda escribir en él.
+  # ------------------------------------------------------------------
+  fix-permissions:
+    image: alpine:3.19
+    user: root
+    volumes:
+      - ./data:/opt/airflow/data
+    command: ["sh", "-c", "chown -R 50000:0 /opt/airflow/data && chmod -R 775 /opt/airflow/data"]
 
   # ------------------------------------------------------------------
   # PostgreSQL — backend de Airflow y MLflow
