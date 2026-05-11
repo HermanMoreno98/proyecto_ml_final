@@ -349,10 +349,15 @@ def train_and_log_hpo(
 
         # Trazabilidad de datos
         if data_version_info:
+            # data_version_info puede ser una lista (un dict por archivo S3)
+            # o un dict único; normalizamos siempre a lista
+            info_list = data_version_info if isinstance(data_version_info, list) else [data_version_info]
+            first = info_list[0] if info_list else {}
             mlflow.set_tags({
-                "data.s3_bucket": data_version_info.get("bucket", ""),
-                "data.s3_key": data_version_info.get("key", ""),
-                "data.s3_version_id": data_version_info.get("version_id", ""),
+                "data.s3_bucket": first.get("bucket", first.get("key", "")),
+                "data.s3_key": first.get("key", ""),
+                "data.s3_version_id": first.get("version_id", ""),
+                "data.num_files": str(len(info_list)),
                 "training.mode": "hpo_optuna",
                 "hpo.n_trials": str(n_trials),
             })
