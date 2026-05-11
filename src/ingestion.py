@@ -167,18 +167,23 @@ def get_latest_version_info(bucket: str, s3_key: str, region: str | None = None)
 def ensure_bucket_versioning(bucket: str, region: str | None = None) -> None:
     """
     Verifica que el bucket tenga versionado habilitado.
-    Lanza RuntimeError si no está activo para prevenir pérdida de trazabilidad.
+    Si no está activo, lo habilita automáticamente.
     """
     client = _get_s3_client(region)
     try:
         response = client.get_bucket_versioning(Bucket=bucket)
         status = response.get("Status", "")
-        if status != "Enabled":
-            raise RuntimeError(
-                f"El bucket '{bucket}' no tiene versionado habilitado (status='{status}'). "
-                "Habilítalo en la consola de AWS S3 antes de continuar."
+        if status == "Enabled":
+            logger.info("Bucket '%s' — versionado: %s", bucket, status)
+        else:
+            logger.warning(
+                "Bucket '%s' — versionado '%s'. Habilitando automáticamente...", bucket, status
             )
-        logger.info("Bucket '%s' — versionado: %s", bucket, status)
+            client.put_bucket_versioning(
+                Bucket=bucket,
+                VersioningConfiguration={"Status": "Enabled"},
+            )
+            logger.info("Bucket '%s' — versionado habilitado correctamente.", bucket)
     except ClientError as exc:
-        logger.error("Error verificando versionado del bucket '%s': %s", bucket, exc)
+        logger.error("Error configurando versionado del bucket '%s': %s", bucket, exc)
         raise
