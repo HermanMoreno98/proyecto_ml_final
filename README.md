@@ -28,6 +28,7 @@ proyecto_ml_final/
 ├── main.py                      ← Orquestador local (sin Airflow)
 ├── dashboard.py                 ← Dashboard interactivo Streamlit
 ├── Dockerfile                   ← Imagen custom: pipeline ML + dashboard Streamlit
+├── Dockerfile.airflow           ← Imagen custom de Airflow con dependencias pre-instaladas
 ├── docker-compose.yml           ← Stack: Airflow + MLflow + PostgreSQL + Streamlit
 ├── .dockerignore
 ├── .env.example                 ← Plantilla de credenciales (copia a .env)
@@ -102,7 +103,17 @@ streamlit run dashboard.py
 cp .env.example .env
 ```
 
-**2. Elige la fuente de datos:**
+**2. Construye la imagen personalizada de Airflow** (solo la primera vez o al cambiar dependencias):
+
+```bash
+docker build -f Dockerfile.airflow -t airflow-custom:latest .
+```
+
+> Esto pre-instala `xgboost`, `optuna`, `mlflow`, `scikit-learn`, `boto3` y `s3fs` en la imagen
+> de Airflow, evitando que cada contenedor ejecute `pip install` al arrancar (lo que causaba
+> picos de CPU/RAM y fallos por falta de recursos).
+
+**3. Elige la fuente de datos:**
 
 #### B.1 — Datos locales (sin AWS, más rápido para pruebas)
 
@@ -140,16 +151,16 @@ El pipeline descargará los CSV automáticamente desde S3 al arrancar el DAG.
 > Puedes cambiar entre modos sin reiniciar los contenedores desde la UI de Airflow:
 > `Admin → Variables → DATA_SOURCE` → `local` o `s3`.
 
-**3. Levanta todos los servicios:**
+**4. Levanta todos los servicios:**
 
 ```bash
-docker-compose up -d
+docker compose up -d
 
 # Verificar que todos estén healthy (puede tardar ~2 min la primera vez)
-docker-compose ps
+docker compose ps
 ```
 
-**4. URLs disponibles:**
+**5. URLs disponibles:**
 
 | Servicio | URL | Credenciales |
 |---|---|---|
@@ -157,18 +168,18 @@ docker-compose ps
 | MLflow UI | http://localhost:5001 | — |
 | Streamlit | http://localhost:8501 | — |
 
-**5. Activa y ejecuta el DAG en Airflow:**
+**6. Activa y ejecuta el DAG en Airflow:**
 
 - Entra a http://localhost:8080
 - Busca el DAG `ml_pipeline_dag`
 - Actívalo con el toggle y haz clic en **Trigger DAG**
 - El pipeline ejecuta: Ingestión → Preprocesamiento → Entrenamiento HPO → Monitoreo PSI → Postprocesamiento TLV
 
-**6. Detener el stack:**
+**7. Detener el stack:**
 
 ```bash
-docker-compose down          # detiene contenedores (conserva datos)
-docker-compose down -v       # detiene y borra volúmenes (reset completo)
+docker compose down          # detiene contenedores (conserva datos)
+docker compose down -v       # detiene y borra volúmenes (reset completo)
 ```
 
 ### Configuración de Variables en Airflow (opcional, ya se auto-configuran)
@@ -176,9 +187,9 @@ docker-compose down -v       # detiene y borra volúmenes (reset completo)
 Las variables se establecen automáticamente al iniciar. Para cambiarlas desde terminal:
 
 ```bash
-docker-compose exec airflow-web airflow variables set DATA_SOURCE local
-docker-compose exec airflow-web airflow variables set S3_BUCKET_RAW tu-bucket
-docker-compose exec airflow-web airflow variables set PSI_ALERT_THRESHOLD 0.25
+docker compose exec airflow-web airflow variables set DATA_SOURCE local
+docker compose exec airflow-web airflow variables set S3_BUCKET_RAW tu-bucket
+docker compose exec airflow-web airflow variables set PSI_ALERT_THRESHOLD 0.25
 ```
 
 ## Estructura del bucket S3 (solo para DATA_SOURCE=s3)

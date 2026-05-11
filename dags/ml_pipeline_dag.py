@@ -71,6 +71,24 @@ PSI_ALERT_THRESHOLD = float(Variable.get("PSI_ALERT_THRESHOLD", default_var="0.2
 # Tareas del pipeline
 # ---------------------------------------------------------------------------
 
+def _consolidate_csvs_to_disk(csv_paths: list, output_path: Path) -> int:
+    """
+    Concatena una lista de CSV escribiendo al disco de forma incremental
+    para evitar cargar todos los DataFrames en memoria simultáneamente.
+    Retorna el número total de filas escritas.
+    """
+    import pandas as pd
+
+    total_rows = 0
+    write_header = True
+    for path in csv_paths:
+        for chunk in pd.read_csv(path, chunksize=50_000):
+            chunk.to_csv(output_path, mode="a", index=False, header=write_header)
+            total_rows += len(chunk)
+            write_header = False
+    return total_rows
+
+
 def task_ingest(**context) -> None:
     """
     Descarga o copia los CSV al worker según la variable DATA_SOURCE:
@@ -82,8 +100,6 @@ def task_ingest(**context) -> None:
     En ambos casos consolida todos los CSV en un único Data_CU_venta.csv
     y pushea la ruta al XCom.
     """
-    import pandas as pd
-
     data_source = Variable.get("DATA_SOURCE", default_var="s3").strip().lower()
 
     raw_dir = WORKDIR / "raw"
@@ -102,12 +118,12 @@ def task_ingest(**context) -> None:
                 "Asegúrate de que ./data/raw/ tiene los CSV en el host."
             )
         logger.info("DATA_SOURCE=local → leyendo %d archivos desde %s", len(csv_files), local_raw)
-        dfs = [pd.read_csv(p) for p in csv_files]
         version_info_list = [{"key": str(p), "version_id": "local", "etag": "local"} for p in csv_files]
+        csv_to_consolidate = list(csv_files)
 
     else:
         # ------------------------------------------------------------------
-        # Modo S3: descarga desde AWS
+        # Modo S3: descarga desde AWS con streaming para no cargar en RAM
         # ------------------------------------------------------------------
         import boto3
         from src.ingestion import ensure_bucket_versioning
@@ -130,9 +146,12 @@ def task_ingest(**context) -> None:
                     continue
                 dest = raw_dir / key.split("/")[-1]
                 logger.info("Descargando s3://%s/%s → %s", bucket, key, dest)
+                # Streaming: descarga en bloques de 8 MB para no cargar el
+                # archivo completo en RAM antes de escribirlo al disco.
                 response = s3.get_object(Bucket=bucket, Key=key)
                 with open(dest, "wb") as f:
-                    f.write(response["Body"].read())
+                    for block in response["Body"].iter_chunks(chunk_size=8 * 1024 * 1024):
+                        f.write(block)
                 downloaded.append(dest)
                 version_info_list.append({
                     "key": key,
@@ -144,12 +163,17 @@ def task_ingest(**context) -> None:
             raise FileNotFoundError(
                 f"No se encontraron archivos CSV en s3://{bucket}/{s3_prefix}"
             )
-        dfs = [pd.read_csv(p) for p in sorted(downloaded)]
+        csv_to_consolidate = sorted(downloaded)
 
-    logger.info("Consolidando %d archivos CSV...", len(dfs))
-    pd.concat(dfs, ignore_index=True).to_csv(unified_path, index=False)
-    logger.info("Dataset unificado guardado en: %s (%d filas)", unified_path,
-                sum(len(d) for d in dfs))
+    # ------------------------------------------------------------------
+    # Consolidación incremental: un CSV a la vez, por chunks de 50k filas.
+    # Nunca se tienen >1 DataFrame en memoria al mismo tiempo.
+    # ------------------------------------------------------------------
+    logger.info("Consolidando %d archivos CSV...", len(csv_to_consolidate))
+    if unified_path.exists():
+        unified_path.unlink()  # limpiar ejecución anterior
+    total_rows = _consolidate_csvs_to_disk(csv_to_consolidate, unified_path)
+    logger.info("Dataset unificado guardado en: %s (%d filas)", unified_path, total_rows)
 
     context["ti"].xcom_push(key="data_version_info", value=version_info_list)
     context["ti"].xcom_push(key="raw_path", value=str(unified_path))
