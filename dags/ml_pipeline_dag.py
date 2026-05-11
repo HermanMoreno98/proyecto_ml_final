@@ -186,19 +186,26 @@ def task_preprocess(**context) -> None:
     pueda pasarlo a get_groups() con los valores string originales de grp_campecs06m.
     Pushea las rutas de los splits al XCom.
     """
+    import gc
     import pandas as pd
     from src.preprocessing import run_preprocessing, VALIDATION_PARTITION
 
     raw_path = context["ti"].xcom_pull(key="raw_path", task_ids="ingest")
     output_dir = WORKDIR / "processed"
-
-    # Guardar val crudo (partition == p10) ANTES del encoding para postprocesamiento
-    df_raw = pd.read_csv(raw_path)
-    df_val_raw = df_raw[df_raw["partition"] == VALIDATION_PARTITION].copy()
     raw_dir = WORKDIR / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     val_raw_path = str(raw_dir / "df_val_raw.csv")
-    df_val_raw.to_csv(val_raw_path, index=False)
+
+    # Guardar val crudo (partition == p10) ANTES del encoding para postprocesamiento.
+    # Se lee solo la partición p10 con chunksize para no cargar el CSV entero en RAM.
+    with pd.read_csv(raw_path, chunksize=100_000) as reader:
+        chunks_val_raw = [
+            chunk[chunk["partition"] == VALIDATION_PARTITION]
+            for chunk in reader
+        ]
+    pd.concat(chunks_val_raw, ignore_index=True).to_csv(val_raw_path, index=False)
+    del chunks_val_raw
+    gc.collect()
 
     df_train, df_test, df_val, metadata = run_preprocessing(data_path=raw_path)
 
@@ -207,9 +214,18 @@ def task_preprocess(**context) -> None:
     test_path = str(output_dir / "df_test.csv")
     val_path = str(output_dir / "df_val.csv")
 
+    # Guardar y liberar cada split inmediatamente para no tener los 3 en RAM a la vez
     df_train.to_csv(train_path, index=False)
+    del df_train
+    gc.collect()
+
     df_test.to_csv(test_path, index=False)
+    del df_test
+    gc.collect()
+
     df_val.to_csv(val_path, index=False)
+    del df_val
+    gc.collect()
 
     context["ti"].xcom_push(key="train_path", value=train_path)
     context["ti"].xcom_push(key="test_path", value=test_path)

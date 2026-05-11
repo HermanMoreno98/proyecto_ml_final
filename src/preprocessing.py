@@ -208,6 +208,8 @@ def run_preprocessing(
     Returns:
         (df_train, df_test, df_val, metadata)
     """
+    import gc
+
     df = load_data(data_path)
     df, dropped_cols = drop_high_nan_columns(df, threshold=nan_threshold)
     df = impute_zeros(df)
@@ -215,6 +217,10 @@ def run_preprocessing(
     df = impute_categoricals(df)
     df, encoders = encode_categorical_features(df)
     df_train, df_test, df_val = split_data(df)
+
+    # Liberar el DataFrame completo antes de que el caller guarde los splits
+    del df
+    gc.collect()
 
     metadata = {
         "dropped_columns": dropped_cols,
