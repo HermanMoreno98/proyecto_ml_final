@@ -38,7 +38,7 @@ PARTITION_LABEL = {f"p{i}": f"p{i}" for i in range(1, 11)}  # p1..p10
 # Helpers
 # ---------------------------------------------------------------------------
 
-@st.cache_data
+@st.cache_data(ttl=120)
 def load_output_tlv() -> pd.DataFrame | None:
     """Carga el CSV de scoring TLV más reciente disponible."""
     files = sorted(DIR_POSTPROCESSED.glob("output_tlv*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -47,7 +47,7 @@ def load_output_tlv() -> pd.DataFrame | None:
     return pd.read_csv(files[0])
 
 
-@st.cache_data
+@st.cache_data(ttl=120)
 def load_metrics_by_month() -> pd.DataFrame | None:
     """Carga métricas AUC y PSI por partición (mes) generadas por stage_monitor."""
     path = DIR_MONITORING / "metrics_by_month.csv"
@@ -59,15 +59,22 @@ def load_metrics_by_month() -> pd.DataFrame | None:
     return df.sort_values("_order").drop(columns="_order").reset_index(drop=True)
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_mlflow_runs() -> pd.DataFrame:
     """
     Lee los runs del experimento desde MLflow.
     Devuelve columnas normalizadas: start_time, auc, psi_score, run_name.
     """
     try:
+        import os
         import mlflow
-        mlflow.set_tracking_uri("http://localhost:5001")
+        # Usa la variable de entorno (http://mlflow:5000 en Docker,
+        # http://localhost:5001 en local) y el hardcode solo como último fallback.
+        tracking_uri = (
+            os.environ.get("MLFLOW_TRACKING_URI")
+            or "http://localhost:5001"
+        )
+        mlflow.set_tracking_uri(tracking_uri)
         client = mlflow.tracking.MlflowClient()
 
         all_exps = client.search_experiments()
@@ -79,6 +86,7 @@ def load_mlflow_runs() -> pd.DataFrame:
             runs = client.search_runs(
                 experiment_ids=[exp.experiment_id],
                 order_by=["start_time ASC"],
+                max_results=200,
             )
             for r in runs:
                 m = r.data.metrics
