@@ -24,7 +24,7 @@ Variables de Airflow requeridas (Admin → Variables):
     MLFLOW_TRACKING_URI     URI del servidor MLflow.
     MLFLOW_EXPERIMENT_NAME  Nombre del experimento (default: cu_venta_e2e).
     MLFLOW_MODEL_NAME       Nombre en Model Registry (default: cu_venta_xgb).
-    HPO_N_TRIALS            Número de trials Optuna (default: 30).
+    HPO_N_TRIALS            Número de trials Optuna (default: 6).
     PSI_ALERT_THRESHOLD     Umbral PSI para disparar re-entrenamiento (default: 0.25).
 
 Conexiones de Airflow (Admin → Connections):
@@ -59,8 +59,11 @@ DEFAULT_ARGS = {
     "email_on_failure": False,
 }
 
-# Directorio temporal compartido entre tareas (en el worker de Airflow)
-WORKDIR = Path("/tmp/cu_venta_pipeline")
+# Directorio de trabajo compartido entre tareas.
+# En Docker apunta al volumen montado (./data en el host) para que
+# Streamlit y el pipeline local lean/escriban el mismo lugar.
+# En local (sin Docker) cae a data/ relativo al repo.
+WORKDIR = Path(os.environ.get("PIPELINE_WORKDIR", "/opt/airflow/data"))
 
 # Umbral PSI a partir del cual se considera deriva severa y se re-entrena
 # Según instrucciones: > 0.25 → ALERT (re-entrenamiento automático)
@@ -304,7 +307,7 @@ def task_train(**context) -> None:
     experiment_name = Variable.get("MLFLOW_EXPERIMENT_NAME", default_var="cu_venta_e2e")
     model_name = Variable.get("MLFLOW_MODEL_NAME", default_var="cu_venta_xgb")
     tracking_uri = Variable.get("MLFLOW_TRACKING_URI", default_var=None)
-    n_trials = int(Variable.get("HPO_N_TRIALS", default_var="30"))
+    n_trials = int(Variable.get("HPO_N_TRIALS", default_var="6"))
 
     run_id = train_and_log_hpo(
         train_path=train_path,
@@ -441,12 +444,19 @@ def task_register_model(**context) -> None:
     model_name = Variable.get("MLFLOW_MODEL_NAME", default_var="cu_venta_xgb")
     client = MlflowClient()
 
-    versions = client.get_latest_versions(model_name, stages=["None"])
+    versions = client.get_latest_versions(model_name, stages=["None", "Staging"])
     if not versions:
         logger.warning("No hay versiones nuevas del modelo '%s' para promover.", model_name)
         return
 
-    latest = versions[0]
+    # Tomar la versión más reciente por número de versión
+    latest = sorted(versions, key=lambda v: int(v.version), reverse=True)[0]
+    if latest.current_stage == "Staging":
+        logger.info(
+            "Modelo '%s' v%s ya está en Staging. Sin cambios necesarios.",
+            model_name, latest.version,
+        )
+        return
     client.transition_model_version_stage(
         name=model_name,
         version=latest.version,
