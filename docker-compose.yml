@@ -68,11 +68,6 @@ services:
       retries: 5
       start_period: 5s
     restart: always
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '1'
 
   # ------------------------------------------------------------------
   # MLflow — Tracking server + Model Registry (artefactos en AWS S3)
@@ -101,11 +96,6 @@ services:
       postgres:
         condition: service_healthy
     restart: always
-    deploy:
-      resources:
-        limits:
-          memory: 1g
-          cpus: '1'
 
   # ------------------------------------------------------------------
   # Airflow — inicialización
@@ -157,11 +147,6 @@ services:
       airflow-init:
         condition: service_completed_successfully
     restart: always
-    deploy:
-      resources:
-        limits:
-          memory: 1g
-          cpus: '1'
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
@@ -179,11 +164,6 @@ services:
       airflow-init:
         condition: service_completed_successfully
     restart: always
-    deploy:
-      resources:
-        limits:
-          memory: 1g
-          cpus: '1'
 
   # ------------------------------------------------------------------
   # Dashboard Streamlit (imagen custom desde Dockerfile raíz)
@@ -206,11 +186,6 @@ services:
     depends_on:
       - mlflow
     restart: always
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '1'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s
