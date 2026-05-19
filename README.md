@@ -276,7 +276,3 @@ python main.py --mode train --use-s3 --hpo
 # Ver modelos registrados en MLflow
 mlflow models list --tracking-uri http://localhost:5000
 ```
-
-## Repositorio
-
-[GitHub — proyecto_ml_final](https://github.com/tu-usuario/proyecto_ml_final)
