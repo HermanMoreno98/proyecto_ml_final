@@ -211,8 +211,19 @@ else:
 
     with col_c:
         st.write("**AUC por mes (partición)**")
-        chart = df_months.dropna(subset=["auc"]).set_index("partition")[["auc"]].rename(columns={"auc": "AUC"})
-        st.line_chart(chart)
+        import altair as alt
+        chart_data = df_months.dropna(subset=["auc"])[["partition", "auc"]].rename(columns={"auc": "AUC"})
+        auc_chart = (
+            alt.Chart(chart_data)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("partition:O", title="Partición"),
+                y=alt.Y("AUC:Q", scale=alt.Scale(domain=[0.8, 0.9]), title="AUC"),
+                tooltip=["partition", "AUC"],
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(auc_chart, use_container_width=True)
 
     with col_d:
         st.write("**PSI por mes (vs. p1 como referencia)**")
@@ -315,8 +326,136 @@ with col_f:
 
 st.dataframe(efec.set_index("Grupo"), width="stretch")
 
+st.divider()
+
 # ---------------------------------------------------------------------------
-# Bloque 5: Curva de recall por decil (bonus)
+# Bloque 5: Análisis de segmentación de clientes
+# ---------------------------------------------------------------------------
+
+segment_columns = [
+    c for c in ["partition", "grp_campecs06m", "canal", "zona", "edad", "grupo_ejec_tlv"]
+    if c in df_filtered.columns
+]
+if segment_columns:
+    segment = st.selectbox("Segmento para análisis", segment_columns, index=0)
+    agg_fields: dict[str, tuple[str, str]] = {}
+    if "monto" in df_filtered.columns:
+        agg_fields["Monto promedio (S/)"] = ("monto", "mean")
+    if "prob" in df_filtered.columns:
+        agg_fields["Score promedio"] = ("prob", "mean")
+    if "target" in df_filtered.columns:
+        agg_fields["Tasa de conversión (%)"] = ("target", "mean")
+
+    count_col = "codunicocli" if "codunicocli" in df_filtered.columns else "prob"
+    seg_df = (
+        df_filtered.groupby(segment)
+        .agg(Clientes=(count_col, "nunique" if count_col == "codunicocli" else "count"), **agg_fields)
+        .sort_values("Clientes", ascending=False)
+        .reset_index()
+    )
+
+    if "Tasa de conversión (%)" in seg_df.columns:
+        seg_df["Tasa de conversión (%)"] = (seg_df["Tasa de conversión (%)"] * 100).round(2)
+    if "Monto promedio (S/)" in seg_df.columns:
+        seg_df["Monto promedio (S/)"] = seg_df["Monto promedio (S/)"] .round(2)
+    if "Score promedio" in seg_df.columns:
+        seg_df["Score promedio"] = seg_df["Score promedio"].round(4)
+
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        if "Monto promedio (S/)" in seg_df.columns:
+            st.write("**Monto promedio por segmento**")
+            st.bar_chart(seg_df.set_index(segment)["Monto promedio (S/)"])
+        elif "Score promedio" in seg_df.columns:
+            st.write("**Score promedio por segmento**")
+            st.bar_chart(seg_df.set_index(segment)["Score promedio"])
+    with col_s2:
+        if "Tasa de conversión (%)" in seg_df.columns:
+            st.write("**Tasa de conversión (%) por segmento**")
+            st.bar_chart(seg_df.set_index(segment)["Tasa de conversión (%)"])
+        else:
+            st.write("**Tamaño de segmento**")
+            st.bar_chart(seg_df.set_index(segment)["Clientes"])
+
+    st.dataframe(seg_df.set_index(segment), width="stretch", hide_index=False)
+else:
+    st.info("No hay columnas de segmento reconocidas para análisis dinámico.")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Bloque 6: Explicabilidad y ranking de prioridades
+# ---------------------------------------------------------------------------
+
+st.subheader("6. Explicabilidad y ranking de prioridades")
+if "prob" in df_filtered.columns:
+    prob_cutoff = st.slider(
+        "Probabilidad mínima para cliente prioritario",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.25,
+        step=0.05,
+    )
+    monto_cutoff = 0.0
+    if "monto" in df_filtered.columns:
+        monto_cutoff = st.number_input(
+            "Monto mínimo para cliente prioritario",
+            min_value=0.0,
+            value=float(df_filtered["monto"].quantile(0.75)),
+            step=100.0,
+            format="%.2f",
+        )
+
+    rule_df = df_filtered[df_filtered["prob"] >= prob_cutoff]
+    if "monto" in rule_df.columns:
+        rule_df = rule_df[rule_df["monto"] >= monto_cutoff]
+
+    summary = {
+        "Clientes priorizados": len(rule_df),
+        "Porcentaje total": f"{len(rule_df) / len(df_filtered) * 100:.2f}%" if len(df_filtered) else "N/D",
+    }
+    if "monto" in rule_df.columns and len(rule_df):
+        summary["Monto total (S/)"] = round(rule_df["monto"].sum(), 2)
+        summary["Monto promedio (S/)"] = round(rule_df["monto"].mean(), 2)
+    if "puntuacion_tlv" in rule_df.columns and len(rule_df):
+        summary["TLV promedio"] = round(rule_df["puntuacion_tlv"].mean(), 4)
+
+    cols_summary = st.columns(len(summary))
+    for col, (label, value) in zip(cols_summary, summary.items()):
+        col.metric(label, value)
+
+    display_cols = [
+        c for c in ["codunicocli", "partition", "grp_campecs06m", "grupo_ejec_tlv", "prob", "puntuacion_tlv", "monto", "target"]
+        if c in rule_df.columns
+    ]
+    df_priority = (
+        rule_df.sort_values(
+            ["prob", "puntuacion_tlv"] if "puntuacion_tlv" in rule_df.columns else ["prob"],
+            ascending=[False, False] if "puntuacion_tlv" in rule_df.columns else [False],
+        )
+        .head(10)
+        .reset_index(drop=True)
+    )
+    df_priority.index = df_priority.index + 1
+
+    st.write("**Clientes priorizados según regla de negocio**")
+    st.dataframe(df_priority[display_cols], width="stretch")
+
+    if "grupo_ejec_tlv" in rule_df.columns:
+        st.write("**Distribución priorizada por grupo TLV**")
+        group_prior = (
+            rule_df.groupby("grupo_ejec_tlv")
+            .size()
+            .reset_index(name="Clientes")
+            .sort_values("Clientes", ascending=False)
+            .set_index("grupo_ejec_tlv")
+        )
+        st.bar_chart(group_prior)
+else:
+    st.info("No hay columna `prob` para generar el ranking de prioridades.")
+
+# ---------------------------------------------------------------------------
+# Bloque 7: Curva de recall por decil (bonus)
 # ---------------------------------------------------------------------------
 
 if "target" in df.columns and "prob" in df.columns:
