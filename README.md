@@ -1,6 +1,20 @@
 # Pipeline ML E2E — CU Venta
 
+<!-- Autores: Franco Alfredo Lazo Acuña, Hernan Paul Moreno Alvarado -->
+
 Pipeline de Machine Learning end-to-end para el modelo de propensión de venta cruzada (CU Venta), con orquestación en **Apache Airflow**, tracking y **Model Registry en MLflow**, y HPO con **Optuna**.
+
+## Resumen
+
+Este proyecto implementa un pipeline completo que incluye:
+- ingestión de datos desde S3 o fuente local,
+- preprocesamiento y split temporal,
+- entrenamiento con XGBoost y optimización de hiperparámetros con Optuna,
+- monitoreo de drift con PSI/AUC,
+- re-entrenamiento automático en caso de drift,
+- registro y gestión de versiones de modelos en MLflow,
+- postprocesamiento de scoring TLV y exportación de resultados.
+
 
 ## Estructura del proyecto
 
