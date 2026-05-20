@@ -291,6 +291,20 @@ python main.py --mode train --use-s3 --hpo
 mlflow models list --tracking-uri http://localhost:5000
 ```
 
+## Servicios levantados
+
+### Airflow
+
+![Airflow](resources/airflow.png)
+
+### MlFlow
+
+![MlFlow](resources/mlflow.png)
+
+### Streamlit
+
+![Dashboard](resources/dashboard.png)
+
 ## Link del repositorio
 
 https://github.com/HermanMoreno98/proyecto_ml_final
